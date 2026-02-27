@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="sl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CAD Practice Game</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+  <header class="wrap">
+    <h1>CAD Game - fing 3D model's mass</h1>
+  </header>
+  <main class="wrap grid">
+
+    <!-- LEVI STOLPEC -->
+    <div class="leftcol">
+
+      <section class="card">
+        <!-- Vpis uporabnika -->
+        <h2>Uporabnik</h2>
+        <label>
+          <input id="username" autocomplete="username" placeholder="Uporabniško ime" />
+          <input id="password" type="password" autocomplete="current-password" placeholder="Geslo (ni potrebno)" />
+        </label>
+
+        <div class="row">
+          <button id="loginBtn">Login</button>
+          <button id="guestBtn" class="ghost">Gost</button>
+          <button id="clearLocal" class="ghost">Počisti lokalne podatke</button>
+        </div>
+        <div id="result" class="result"></div>
+      </section>
+
+      <section class="card model-list">
+        <!-- Seznam modelov -->
+        <h2>Izberi model</h2>
+        <div id="challengeList" class="list"></div>
+        <div id="challengeLoadErr" class="muted small"></div>
+      </section>
+
+    </div>
+
+    <!-- DESNI STOLPEC -->
+    <section class="card challenge">
+      <!-- Izziv -->
+      <div id="canvas" class="canvas">
+        <canvas id="pdfCanvas"></canvas>
+      </div>
+
+      <div class="meta">
+        <h2 id="challengeTitle">Izziv</h2>
+        <div><b>Čas:</b> <span id="timer">00:00.0</span></div>
+        <div><b>Poskusi:</b> <span id="attempts">0</span></div>
+        <div><b>Toleranca:</b> ±<span id="tol">1</span> g</div>        <button id="startBtn">START</button>      </div>
+
+      <div class="row">
+        <label class="grow">
+          Masa (g)
+          <input id="massInput" inputmode="decimal" placeholder="npr. 128.4" disabled />
+        </label>
+        <button id="submitMass" disabled>Preveri</button>
+        <button id="resetRun" class="ghost" disabled>Prekliči</button>
+        <button id="openPdf" disabled>Odpri PDF</button>
+      </div>
+
+
+
+      <details class="small muted">
+        <summary>Debug / status</summary>
+        <pre id="status"></pre>
+      </details>
+    </section>
+
+  </main>
+
+  <footer class="wrap muted small">
+    <p>
+      Beleženje: vsak START + vsak poskus + prvi uspeh se zapišejo v Google Sheet (Apps Script).
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

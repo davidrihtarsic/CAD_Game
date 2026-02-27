@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "challenges": [
+    {
+      "id": "posodica",
+      "title": "Posodica",
+      "pdf": "challenges/Posodica/Posodica.pdf",
+      "targetMass_g": 44.8,
+      "tolerance_g": 0.5
+    },
+    {
+      "id": "razcepka",
+      "title": "Razcepka",
+      "pdf": "challenges/razcepka/drawing.pdf",
+      "targetMass_g": 8.4,
+      "tolerance_g": 0.5
+    },
+    {
+      "id": "ojnica",
+      "title": "Ojnica APN",
+      "pdf": "challenges/bracket01/drawing.pdf",
+      "targetMass_g": 128.4,
+      "tolerance_g": 1
+    }
+  ]
+}
+
