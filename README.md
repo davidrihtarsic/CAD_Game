@@ -1,11 +1,4 @@
-
-Spodaj je profesionalen, a jedrnat **README.md**, primeren za GitHub repozitorij tvoje igre.
-
-Lahko ga samo copy–paste v `README.md`.
-
----
-
-# 🎯 CAD Practice Game
+# 🎯 CAD Game
 
 Interactive web-based training game for practicing **3D CAD modeling from technical drawings**.
 
