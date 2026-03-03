@@ -9,6 +9,13 @@
       "tolerance_g": 0.5
     },
     {
+      "id": "vijak_m10x40",
+      "title": "Vijak M10x40",
+      "pdf": "challenges/Vijak_M10x40/Navoj_vijak.pdf",
+      "targetMass_g": 33.94,
+      "tolerance_g": 0.5
+    },
+    {
       "id": "razcepka",
       "title": "Razcepka",
       "pdf": "challenges/razcepka/drawing.pdf",
