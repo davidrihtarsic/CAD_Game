@@ -6,6 +6,10 @@
  */
 
 const SPREADSHEET_ID = '1PrQ1YTZS-qfDEPTIfb5n7Av5nqhuRPzfsVXKHbf0st0';
+
+// bump this manually when you deploy a new version so you can verify which
+// script release is actually being executed by clients.
+const SERVER_VERSION = '15';
 const SHEET_EVENTS = 'RESULTS_EVENTS';
 const SHEET_USERS = 'USERS';
 
@@ -48,7 +52,7 @@ function doPost(e) {
       }
     }
 
-    const allowedTypes = new Set(['start', 'attempt', 'success_first', 'success_repeat']);
+    const allowedTypes = new Set(['start', 'attempt', 'success']);
     if (!allowedTypes.has(String(ev.event_type))) {
       return jsonOut({ ok: false, error: 'bad_event_type' });
     }
@@ -56,6 +60,7 @@ function doPost(e) {
     const sessionId = String(ev.session_id);
     const studentId = String(ev.student_id);
     const challengeId = String(ev.challenge_id);
+
 
     const elapsedMs = Number(ev.elapsed_ms);
     const attemptIndex = Number(ev.attempt_index);
@@ -91,6 +96,40 @@ function doPost(e) {
     const sh = ss.getSheetByName(SHEET_EVENTS);
     if (!sh) return jsonOut({ ok: false, error: 'sheet_not_found' });
 
+    // Server-side logic: convert generic 'success' event into first/practice.
+    let eventTypeToLog = String(ev.event_type);
+    if (ev.event_type === 'success') {
+      const existing = sh.getDataRange().getValues();
+      if (existing.length > 0) {
+        // compute indices from header row rather than assume fixed
+        const hdrs = existing[0].map(h => String(h).toLowerCase());
+        const idxStud = hdrs.indexOf('student_id');
+        const idxChal = hdrs.indexOf('challenge_id');
+        const idxEv = hdrs.indexOf('event_type');
+        // fallback to previous hardcoded if header missing
+        const colStud = idxStud !== -1 ? idxStud : 3;
+        const colChal = idxChal !== -1 ? idxChal : 4;
+        const colEv = idxEv !== -1 ? idxEv : 5;
+
+        let hasExistingSuccess = false;
+        for (let i = 1; i < existing.length; i++) {
+          const row = existing[i];
+          if (String(row[colEv]).trim().toLowerCase() === 'success_first' &&
+              String(row[colStud]) === studentId &&
+              String(row[colChal]) === challengeId) {
+            hasExistingSuccess = true;
+            break;
+          }
+        }
+        eventTypeToLog = hasExistingSuccess ? 'success_practice' : 'success_first';
+        // debug log
+        Logger.log(`convert success for ${studentId}/${challengeId}: hasExisting=${hasExistingSuccess}, logging=${eventTypeToLog}`);
+      } else {
+        eventTypeToLog = 'success_first';
+        Logger.log(`convert success for ${studentId}/${challengeId}: no existing rows, logging=success_first`);
+      }
+    }
+
     const ua = (body.user_agent !== undefined && body.user_agent !== null) ? String(body.user_agent) : '';
     const ref = (body.referrer !== undefined && body.referrer !== null) ? String(body.referrer) : '';
 
@@ -100,7 +139,7 @@ function doPost(e) {
       sessionId,
       studentId,
       challengeId,
-      String(ev.event_type),
+      eventTypeToLog,
       elapsedMs,
       attemptIndex,
       massInput,
@@ -146,7 +185,6 @@ function doGet(e) {
     const idxChallenge = headers.indexOf('challenge_id');
     const idxEvent = headers.indexOf('event_type');
     const idxElapsed = headers.indexOf('elapsed_ms');
-    const idxTimestamp = headers.indexOf('timestamp_server');
 
     const times = [];
     let lastTs = 0;
@@ -175,22 +213,22 @@ function doGet(e) {
       if (!Number.isFinite(em)) continue;
 
       const sid = String(r[idxStudent]);
-      // collect every successful time for leaderboard
-      if (bestByStudent[sid] === undefined || em < bestByStudent[sid]) {
+      // record the first success we encounter for each student (sheet order)
+      if (bestByStudent[sid] === undefined) {
         bestByStudent[sid] = em;
       }
 
+      // track user-specific data for averages and last_ms
       if (username && sid === username) {
         userTimes.push(em);
         userSuccessCount++;
-        const ts = new Date(r[idxTimestamp]).getTime();
-        if (ts > lastTs) { lastTs = ts; lastMs = em; }
+        // lastMs remains based on row order, which reflects submission order
+        lastMs = em;
       }
 
       if (!username) {
         times.push(em);
-        const ts = new Date(r[idxTimestamp]).getTime();
-        if (ts > lastTs) { lastTs = ts; lastMs = em; }
+        lastMs = em;
       }
     }
 
@@ -223,6 +261,7 @@ function doGet(e) {
     const best_student = entries.length ? entries[0].student_id : '';
 
     return output_({ ok: true,
+                    server_version: SERVER_VERSION,
                     avg_ms: avg,
                     last_ms: lastMs,
                     total_attempts: attemptCount,
@@ -234,26 +273,84 @@ function doGet(e) {
   }
 
   if (action === 'login') {
-    const username = (params.username || '').toString();
+    const username = (params.username || '').toString().trim();
+    const password = (params.password || '').toString(); // ne trimaj nujno, ampak lahko
     if (!username) return output_({ ok: false, error: 'missing_username' }, e);
-
+    if (!password || password.trim() === '') return output_({ ok: false, error: 'missing_password' }, e);
+  
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sh = ss.getSheetByName(SHEET_USERS);
     if (!sh) return output_({ ok: false, error: 'users_sheet_missing' }, e);
-
+  
     const rows = sh.getDataRange().getValues();
     const headers = rows[0].map(h => String(h).toLowerCase());
     const idxUser = headers.indexOf('username');
+    const idxPass = headers.indexOf('password');   // <-- zahteva stolpec "password"
     const idxEmail = headers.indexOf('email');
-
+  
+    if (idxUser === -1) return output_({ ok: false, error: 'users_missing_username_column' }, e);
+    if (idxPass === -1) return output_({ ok: false, error: 'users_missing_password_column' }, e);
+  
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
-      if (String(r[idxUser]) === username) {
-        const email = String(r[idxEmail] || '');
-        return output_({ ok: true, email: email }, e);
+      if (String(r[idxUser]).trim() === username) {
+        const stored = String(r[idxPass] || '');
+        if (stored !== password) {
+          return output_({ ok: false, error: 'wrong_password' }, e);
+        }
+        const email = (idxEmail !== -1) ? String(r[idxEmail] || '') : '';
+        return output_({ ok: true, email }, e);
       }
     }
     return output_({ ok: false, error: 'user_not_found' }, e);
+  }
+/*  if (action === 'login') {
+ *   const username = (params.username || '').toString();
+ *   if (!username) return output_({ ok: false, error: 'missing_username' }, e);
+
+ *   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+ *   const sh = ss.getSheetByName(SHEET_USERS);
+ *   if (!sh) return output_({ ok: false, error: 'users_sheet_missing' }, e);
+
+ *   const rows = sh.getDataRange().getValues();
+ *   const headers = rows[0].map(h => String(h).toLowerCase());
+ *   const idxUser = headers.indexOf('username');
+ *   const idxEmail = headers.indexOf('email');
+
+ *   for (let i = 1; i < rows.length; i++) {
+ *     const r = rows[i];
+ *     if (String(r[idxUser]) === username) {
+ *       const email = String(r[idxEmail] || '');
+ *       return output_({ ok: true, email: email }, e);
+ *     }
+ *   }
+ *   return output_({ ok: false, error: 'user_not_found' }, e);
+ * }
+ */
+  if (action === 'check_first_success') {
+    const username = (params.username || '').toString();
+    const challengeId = (params.challenge_id || '').toString();
+    if (!username || !challengeId) return output_({ ok: false, error: 'missing_params' }, e);
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sh = ss.getSheetByName(SHEET_EVENTS);
+    if (!sh) return output_({ ok: false, error: 'sheet_not_found' }, e);
+
+    const rows = sh.getDataRange().getValues();
+    const headers = rows[0].map(h => String(h).toLowerCase());
+    const idxStudent = headers.indexOf('student_id');
+    const idxChallenge = headers.indexOf('challenge_id');
+    const idxEvent = headers.indexOf('event_type');
+
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (String(r[idxEvent]) === 'success_first' &&
+          String(r[idxStudent]) === username &&
+          String(r[idxChallenge]) === challengeId) {
+        return output_({ ok: true, has_first_success: true }, e);
+      }
+    }
+    return output_({ ok: true, has_first_success: false }, e);
   }
 
   return jsonOut({ ok: true, message: 'cad-logger alive' });

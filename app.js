@@ -27,7 +27,7 @@ const els = {
 };
 
 // hard-coded Apps Script endpoint (replace with your deployed URL)
-const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxHXLRk77ksCNDsC66zK1wvL0XEhL0am1qexOQpuVbBaNhXFlxresfSGk9n3ew9DlooOQ/exec'
+const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbwtQSERBQObXiTleOi_0WqW7yKIvMnsLGHoryLhvcD1Q3ePfkyompuZFj2i0Z6yryoJIQ/exec'
 
 const STORAGE_KEYS = {
   username: 'cadgame_username',
@@ -38,6 +38,10 @@ const LOCAL_STATS_KEY = 'cadgame_local_stats';
 
 let challenges = [];
 let current = null;
+
+// Track which challenges have had their first success logged
+// (persists across multiple sessions/attempts for the same challenge)
+let firstSuccessLoggedPerChallenge = {};
 
 let run = {
   sessionId: null,
@@ -319,7 +323,8 @@ function selectChallenge(id) {
   els.startBtn.disabled = false;
 
   run.sessionId = uuidv4();
-  run.firstSuccessLogged = false;
+  // Check if we've already logged success_first for this challenge globally
+  run.firstSuccessLogged = firstSuccessLoggedPerChallenge[current.id] || false;
 }
 
 function startRun() {
@@ -352,7 +357,9 @@ function startRun() {
 
     run.startedAt = performance.now();
     run.attempts = 0;
-    run.firstSuccessLogged = false;
+    // Note: run.firstSuccessLogged is used locally to avoid sending multiple 'success' events
+    // in one session. Server will determine success_first vs success_practice based on
+    // whether success_first already exists in the database.
 
     // Odmegli thumbnail
     els.canvas.classList.add('revealed');
@@ -367,7 +374,7 @@ function startRun() {
     run.timerHandle = setInterval(tickTimer, 100);
 
     // Log (best effort) — only for logged-in users
-    if (!isGuest() && ep) logEvent('start', { is_correct: '' });
+    if (!isGuest() && getEndpoint()) logEvent('start', { is_correct: '' });
 
     // enable PDF button once run starts
     if (els.openPdf) {
@@ -440,21 +447,23 @@ function checkMass() {
     const t = elapsedMs();
     els.result.textContent = `✅ Pravilno! Čas: ${fmtTime(t)} | Poskusi: ${run.attempts}`;
 
-    const justSucceeded = !run.firstSuccessLogged;
-
-    if (justSucceeded) {
+    const isFirstInSession = !run.firstSuccessLogged;
+    if (isFirstInSession) {
+      // Mark that we've logged a success, but let server decide event type
       run.firstSuccessLogged = true;
+      firstSuccessLoggedPerChallenge[current.id] = true;
       if (!isGuest()) {
-        logEvent('success_first', { mass_input_g: mass, is_correct: true });
+        // Send 'success' (server will log as success_first or success_practice)
+        logEvent('success', { mass_input_g: mass, is_correct: true });
       }
       // store local for guests/ offline
       if (isGuest() || !getEndpoint()) {
-        const s = elapsedMs();
-        addLocalTime(current.id, s);
+        addLocalTime(current.id, t);
       }
     } else {
+      // We've already sent one success for this session - send as practice attempt
       if (!isGuest()) {
-        logEvent('success_repeat', { mass_input_g: mass, is_correct: true });
+        logEvent('success', { mass_input_g: mass, is_correct: true });
       }
     }
 
@@ -463,11 +472,10 @@ function checkMass() {
       addLocalTime(current.id, t);
     }
 
-    // After correct answer show stats overlay.  If this was the first
-    // successful run and we're talking to a remote endpoint, the sheet
-    // write may not be visible instantly; delay a bit so the stats API
-    // can see the new row.
-    const delayMs = (!isGuest() && getEndpoint() && justSucceeded) ? 10000 : 0;
+    // After correct answer show stats overlay.  Server determines if this was
+    // success_first or success_practice based on DB state. Use longer delay on first
+    // success in this session to give sheet time to propagate the new success_first row.
+    const delayMs = (!isGuest() && getEndpoint() && isFirstInSession) ? 10000 : 10000;
     if (delayMs) {
       // show simple progress bar during wait
       const barLen = 10;
@@ -714,31 +722,76 @@ els.clearLocal.onclick = clearLocal;
 // Login / Guest handlers
 if (els.loginBtn) els.loginBtn.onclick = async () => {
   const name = getUsername();
+  const pass = (document.getElementById('password')?.value || '').trim();
   const ep = getEndpoint();
   const v = validateUsername(name);
   if (!v.ok) { els.result.textContent = v.msg; return; }
-  // If endpoint provided, attempt server login (best-effort)
-  if (ep) {
+
+  const guest = (typeof isGuest === 'function') ? isGuest() : false;
+
+  // Geslo obvezno za ne-guest prijavo
+  if (!guest && pass.length === 0) {
+    els.result.textContent = 'Vpiši geslo.';
+    return;
+  }
+
+  // Če endpoint obstaja in nismo guest: zahtevaj uspešno strežniško prijavo
+  if (ep && !guest) {
     try {
-      // password is no longer required; endpoint accepts callback via JSONP
-      const j = await jsonp(`${ep}?action=login&username=${encodeURIComponent(v.norm)}`);
-      if (j && j.ok) {
-        els.result.textContent = `Prijava uspešna (${j.email || v.norm})`;
-      } else {
-        els.result.textContent = `Prijava neuspešna: ${j && j.error || 'napaka'}`;
+      const url = `${ep}?action=login&username=${encodeURIComponent(v.norm)}&password=${encodeURIComponent(pass)}`;
+      const j = await jsonp(url);
+
+      if (!(j && j.ok)) {
+        els.result.textContent = `Prijava neuspešna: ${j?.error || 'napaka'}`;
+        return;
       }
+
+      els.result.textContent = `Prijava uspešna (${j.email || v.norm})`;
     } catch (e) {
-      // ignore network error, allow local login
-      els.result.textContent = 'Prijava lokalno (brez preverjanja endpointa).';
+      els.result.textContent = 'Napaka pri prijavi (endpoint/CORS). Preveri Apps Script deployment in URL.';
+      return;
     }
   } else {
-    els.result.textContent = 'Prijava lokalno (endpoint ni nastavljen).';
+    // Če endpoint ni nastavljen, ne dovoli "lokalne prijave", razen če je guest
+    if (!guest) {
+      els.result.textContent = 'Endpoint ni nastavljen — prijava brez preverjanja ni dovoljena.';
+      return;
+    }
+    els.result.textContent = 'Prijava kot gost.';
   }
-  // persist and load challenges
+
+  // Shrani šele po uspešni prijavi (ali guest)
   localStorage.setItem(STORAGE_KEYS.username, v.norm);
-  localStorage.setItem(STORAGE_KEYS.guest, '0');
+  localStorage.setItem(STORAGE_KEYS.guest, guest ? '1' : '0');
   await loadChallenges();
 };
+// if (els.loginBtn) els.loginBtn.onclick = async () => {
+//   const name = getUsername();
+//   const ep = getEndpoint();
+//   const v = validateUsername(name);
+//   if (!v.ok) { els.result.textContent = v.msg; return; }
+//   // If endpoint provided, attempt server login (best-effort)
+//   if (ep) {
+//     try {
+//       // password is no longer required; endpoint accepts callback via JSONP
+//       const j = await jsonp(`${ep}?action=login&username=${encodeURIComponent(v.norm)}`);
+//       if (j && j.ok) {
+//         els.result.textContent = `Prijava uspešna (${j.email || v.norm})`;
+//       } else {
+//         els.result.textContent = `Prijava neuspešna: ${j && j.error || 'napaka'}`;
+//       }
+//     } catch (e) {
+//       // ignore network error, allow local login
+//       els.result.textContent = 'Prijava lokalno (brez preverjanja endpointa).';
+//     }
+//   } else {
+//     els.result.textContent = 'Prijava lokalno (endpoint ni nastavljen).';
+//   }
+//   // persist and load challenges
+//   localStorage.setItem(STORAGE_KEYS.username, v.norm);
+//   localStorage.setItem(STORAGE_KEYS.guest, '0');
+//   await loadChallenges();
+// };
 
 if (els.guestBtn) els.guestBtn.onclick = async () => {
   localStorage.setItem(STORAGE_KEYS.guest, '1');
