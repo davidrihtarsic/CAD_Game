@@ -11,8 +11,8 @@
     {
       "id": "matica_m8",
       "title": "Matica M8",
-      "pdf": "../challenges/Matica_M8/Matica_M8.pdf",
-      "targetMass_g": 5.22,
+      "pdf": "challenges/Matica_M8/Matica_M8.pdf",
+      "targetMass_g": 5.20,
       "tolerance_g": 0.2,"
     },
     {
