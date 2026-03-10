@@ -23,6 +23,13 @@
       "tolerance_g": 0.5
     },
     {
+      "id": "centrirna_konica_mt3",
+      "title": "Centrirna konica MT3",
+      "pdf": "/challenges/Konica_MT3/Centrirna_konica_MT3.pdf",
+      "targetMass_g": 327.47,
+      "tolerance_g": 2
+    },
+    {
       "id": "razcepka",
       "title": "Razcepka",
       "pdf": "challenges/razcepka/drawing.pdf",
